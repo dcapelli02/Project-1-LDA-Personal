@@ -1,0 +1,909 @@
+---
+title: "Project 1 LDA Prova"
+author: "Daniele Capelli"
+date: "2025-10-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Exploratory Data Analysis in R
+
+Start by analyzing data...
+
+```{r libraries}
+library(haven)
+library(sas7bdat)
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(GGally)
+library(corrplot)
+alz <- read_sas("C:/Users/Daniele/Desktop/2025 - 26 Primo Semestre/Longitudinal Data Analysis/Project 1 Alzheimer LDA/alzheimer25.sas7bdat")
+#alz <- read.csv("C:/Users/Daniele/Desktop/2025 - 26 Primo Semestre/Longitudinal Data Analysis/Project 1 Alzheimer LDA/alzheimer25.csv")
+
+head(alz)
+summary(alz)
+
+alz$trial <- as.factor(alz$trial)
+alz$sex <- as.factor(alz$sex)
+alz$edu <- as.factor(alz$edu)
+alz$job <- as.factor(alz$job)
+alz$wzc <- as.factor(alz$wzc)
+alz$adl <- as.factor(alz$adl)
+
+## Create baseline values
+alz$ab_base <- alz$abpet0
+alz$tau_base <- alz$taupet0
+alz$cdrsb_base <- alz$cdrsb0
+
+summary(alz)
+```
+
+Then create the longitudinal data frame.
+
+```{r dataframe}
+alz_df <- data.frame(alz)
+
+alz_long <- alz_df %>%
+  pivot_longer(
+    # 1️⃣ Seleziona tutte le colonne che iniziano con cdrsb, abpet o taupet,
+    #     seguite da un numero (0–6)
+    cols = matches("^(bprs|cdrsb|abpet|taupet)\\d+$"),
+    
+    # 2️⃣ Crea due nuove colonne:
+    #     - ".value" → il prefisso (cdrsb, abpet, taupet)
+    #     - "year"   → il numero alla fine
+    names_to = c(".value", "year"),
+    
+    # 3️⃣ Divide i nomi in due parti: (prefisso, numero)
+    names_pattern = "(bprs|cdrsb|abpet|taupet)(\\d+)"
+  ) %>%
+  mutate(
+    year = as.numeric(year),                            # converte in numerico
+    sample = factor(rep(1:nrow(alz_df), each = 7)) # ID per ogni paziente
+  )
+```
+
+Discretize the quantitative variables (it is useful later on).
+
+```{r continuous vars bins}
+## Maybe any 5 years?
+alz_long$age_disc <- (alz_long$age %/% 5) * 5
+alz_long$age_disc <- as.factor(alz_long$age_disc)
+
+## bmi any 4
+alz_long$bmi_disc <- (alz_long$bmi %/% 4) * 4
+alz_long$bmi_disc <- as.factor(alz_long$bmi_disc)
+
+## inkomen any 500
+alz_long$inkomen_disc <- (alz_long$inkomen %/% 500) * 500
+alz_long$inkomen_disc <- as.factor(alz_long$inkomen_disc)
+
+## adl any 5
+alz_long$adl_disc <- (as.numeric(alz_long$adl) %/% 5) * 5
+alz_long$adl_disc <- as.factor(alz_long$adl_disc)
+
+## cdrsb any 5
+alz_long$cdrsb_disc <- (alz_long$cdrsb %/% 5) * 5
+alz_long$cdrsb_disc <- as.factor(alz_long$cdrsb_disc)
+
+## abpet any 0.2
+alz_long$abpet_disc <- (alz_long$abpet %/% 0.2) * 0.2
+alz_long$abpet_disc <- as.factor(alz_long$abpet_disc)
+
+## taupet any 0.2
+alz_long$taupet_disc <- (alz_long$taupet %/% 0.2) * 0.2
+alz_long$taupet_disc <- as.factor(alz_long$taupet_disc)
+```
+
+
+Now create a restricted version to work on for simplicity in certain cases (it is too long to compute everything I will fix it later on if we need it).
+
+```{r rist datates}
+casual <- sample(1:length(alz$patid), 50)
+
+## Now we can start by looking at random values for the mean and see
+## if we can work on the mean and so on
+
+alz_rist <- alz[casual, ]
+alz_rist_df <- data.frame(alz_rist)
+
+alz_rist_long <- alz_rist_df %>%
+  pivot_longer(
+    # 1️⃣ Seleziona tutte le colonne che iniziano con cdrsb, abpet o taupet,
+    #     seguite da un numero (0–6)
+    cols = matches("^(bprs|cdrsb|abpet|taupet)\\d+$"),
+    
+    # 2️⃣ Crea due nuove colonne:
+    #     - ".value" → il prefisso (cdrsb, abpet, taupet)
+    #     - "year"   → il numero alla fine
+    names_to = c(".value", "year"),
+    
+    # 3️⃣ Divide i nomi in due parti: (prefisso, numero)
+    names_pattern = "(bprs|cdrsb|abpet|taupet)(\\d+)"
+  ) %>%
+  mutate(
+    year = as.numeric(year),                            # converte in numerico
+    sample = factor(rep(1:nrow(alz_rist_df), each = 7)) # ID per ogni paziente
+  )
+```
+
+
+```{r}
+casual1 <- sample(1:length(alz$patid), 20)
+
+## Now we can start by looking at random values for the mean and see
+## if we can work on the mean and so on
+
+alz_rist1 <- alz[casual1, ]
+alz_rist1_df <- data.frame(alz_rist1)
+
+alz_rist1_long <- alz_rist1_df %>%
+  pivot_longer(
+    # 1️⃣ Seleziona tutte le colonne che iniziano con cdrsb, abpet o taupet,
+    #     seguite da un numero (0–6)
+    cols = matches("^(bprs|cdrsb|abpet|taupet)\\d+$"),
+    
+    # 2️⃣ Crea due nuove colonne:
+    #     - ".value" → il prefisso (cdrsb, abpet, taupet)
+    #     - "year"   → il numero alla fine
+    names_to = c(".value", "year"),
+    
+    # 3️⃣ Divide i nomi in due parti: (prefisso, numero)
+    names_pattern = "(bprs|cdrsb|abpet|taupet)(\\d+)"
+  ) %>%
+  mutate(
+    year = as.numeric(year),                            # converte in numerico
+    sample = factor(rep(1:nrow(alz_rist1_df), each = 7)) # ID per ogni paziente
+  )
+```
+
+
+Finally start to look at visual representations.
+
+```{r sample visualization restricted}
+ggplot(alz_rist1_long, aes(x = year, y = bprs, group = patid, 
+                                color = sample, show.legend = FALSE)) + 
+  geom_line(alpha = 1, show.legend = FALSE) +
+  theme_bw() +
+  labs(title = "BPRS against year of measuring")
+
+ggplot(alz_rist_long, aes(x = year, y = bprs, group = patid, 
+                                color = sample, show.legend = FALSE)) + 
+  geom_line(alpha = 0.5, show.legend = FALSE) +
+  theme_bw() +
+  labs(title = "BPRS against year of measuring")
+
+ggplot(alz_rist_long, aes(x = year, y = cdrsb, group = patid, 
+                                color = sample, show.legend = FALSE)) + 
+  geom_line(alpha = 0.5, show.legend = FALSE) +
+  theme_bw() +
+  labs(title = "CDRSB against year of measuring")
+
+
+ggplot(alz_rist_long, aes(x = year, y = abpet, group = patid, 
+                                color = sample, show.legend = FALSE)) + 
+  geom_line(alpha = 0.5, show.legend = FALSE) +
+  theme_bw() +
+  labs(title = "ABPET against year of measuring")
+
+ggplot(alz_rist_long, aes(x = year, y = taupet, group = patid, 
+                          color = sample, show.legend = FALSE)) + 
+  geom_line(alpha = 0.5, show.legend = FALSE) +
+  theme_bw() +
+  labs(title = "TAUPET against year of measuring")
+```
+
+Maybe we should analyze how many missing data we have??
+
+Now try to estimate average behavior in different groups.
+
+```{r general mean}
+## General behavior
+ggplot(alz_long, aes(x = year, y = bprs)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+               alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior")
+
+ggplot(alz_long, aes(x = year, y = bprs, group = sex, color = sex)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+               alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt sex")
+
+ggplot(alz_long, aes(x = year, y = bprs, group = trial, color = trial)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+               alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt trial")
+
+ggplot(alz_long, aes(x = year, y = bprs, group = trial, color = trial)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  #stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+  #             alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt trial without variance")
+
+ggplot(alz_long, aes(x = year, y = bprs, group = age, color = age)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+               alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt age")
+
+ggplot(alz_long, aes(x = year, y = bprs, group = age, color = age)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  #stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+  #             alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt age without variance")
+
+ggplot(alz_long, aes(x = year, y = bprs, group = edu, color = edu)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+               alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt edu")
+
+ggplot(alz_long, aes(x = year, y = bprs, group = bmi, color = bmi)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+               alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt bmi")
+
+ggplot(alz_long, aes(x = year, y = bprs, group = bmi, color = bmi)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  #stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+  #             alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt bmi without variance")
+
+ggplot(alz_long, aes(x = year, y = bprs, group = inkomen, color = inkomen)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+               alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt inkomen")
+
+ggplot(alz_long, aes(x = year, y = bprs, group = inkomen, color = inkomen)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  #stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+  #             alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt inkomen without variance")
+
+ggplot(alz_long, aes(x = year, y = bprs, group = job, color = job)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+               alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt job")
+
+ggplot(alz_long, aes(x = year, y = bprs, group = adl, color = adl)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+               alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt adl")
+
+ggplot(alz_long, aes(x = year, y = bprs, group = wzc, color = wzc)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+               alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt wzc")
+
+```
+
+_NOTA PERSONALE: con questo codice ggplot mostra una stima puntuale della deviazione standard, non della varianza, ma penso vada comunque bene? Prova a chiedere agli altri nel caso si sistema subito_
+
+From the general mean behavior it seems that over the years the bprs value increases in a linear way. In addition it seems that the estimated variance among the years is more or less constant (so we can apply the variogram procedure??).
+
+Speaking of the categorical variables, it seems to me that there are significant differences between groups speaking of sex (but not particularly marked), job and wzc. The variable edu seems to be not of particular interest?
+
+Now we also have a look at the biological indicators (but maybe we will discretize them later on which is more significant).
+
+```{r biomarker}
+ggplot(alz_long, aes(x = year, y = bprs, group = cdrsb_base, color = cdrsb_base)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+               alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt cdrsb")
+
+ggplot(alz_long, aes(x = year, y = bprs, group = cdrsb_base, color = cdrsb_base)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  #stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+  #             alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt cbrs without variance")
+
+ggplot(alz_long, aes(x = year, y = bprs, group = ab_base, color = ab_base)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+               alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt abpet")
+
+ggplot(alz_long, aes(x = year, y = bprs, group = ab_base, color = ab_base)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  #stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+  #             alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt abpet without variance")
+
+ggplot(alz_long, aes(x = year, y = bprs, group = tau_base, color = tau_base)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+               alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt taupet")
+
+ggplot(alz_long, aes(x = year, y = bprs, group = tau_base, color = tau_base)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  #stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+  #             alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt taupet without variance")
+```
+
+Not that understandable.
+
+Maybe we should discretize the continuous variables inside bins to see if there are significant differences. Should we consider the trial??
+
+
+```{r mean quant vars}
+ggplot(alz_long, aes(x = year, y = bprs, group = age_disc, color = age_disc)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  #stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+  #             alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt age_disc without variance")
+
+ggplot(alz_long, aes(x = year, y = bprs, group = bmi_disc, color = bmi_disc)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  #stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+  #             alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt bmi_disc without variance")
+
+ggplot(alz_long, aes(x = year, y = bprs, group = inkomen_disc, color = inkomen_disc)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  #stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+  #             alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt inkomen_disc without variance")
+
+ggplot(alz_long, aes(x = year, y = bprs, group = adl_disc, color = adl_disc)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  #stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+  #             alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt adl_disc without variance")
+
+ggplot(alz_long, aes(x = year, y = bprs, group = cdrsb_disc, color = cdrsb_disc)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  #stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+  #             alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt cdrsb_disc without variance")
+
+ggplot(alz_long, aes(x = year, y = bprs, group = abpet_disc, color = abpet_disc)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  #stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+  #             alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt abpet_disc without variance")
+
+ggplot(alz_long, aes(x = year, y = bprs, group = taupet_disc, color = taupet_disc)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  #stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+  #             alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt taupet_disc without variance")
+```
+
+Here we have more interesting results. It seems that the slopes stays the same over the different groups but the baselines are different, this could be interest. We should study this in a better way.
+
+
+## Visual representation of the paired data and correlations
+
+Just to speed up the computations it is better to use the restricted dataset.
+
+```{r ggpairs}
+ggpairs(alz_rist_long, columns = c(3:13, 16),
+        cardinality_threshold = 21)
+```
+
+_Speaking of bprs (the variable we are interested in) it seems that it is correlated more to age, adl, inkomen (not that muche), maybe edu (but it doesn't seem like the case), wzc, year (definitely), abpet (and somehow also to the other two biomarkers). But we should investigate this better._
+
+**COMMENTO DA RIFARE**
+
+Just to be complete.
+
+```{r pairs}
+pairs(alz_rist_long[, c(3:13, 16)])
+```
+
+## Covariance structure
+
+_We could do it with the corrplot library? Don't know maybe later on_
+
+We need to study the possible covariance structure of the `bprs` variable. 
+
+```{r covariance bprs}
+var_by_year <- alz_long %>%
+  group_by(year) %>%
+  summarise(var_bprs = var(bprs, na.rm = TRUE))
+
+ggplot(var_by_year, aes(x = year, y = var_bprs)) +
+  geom_line() + geom_point(size=2) +
+  theme_minimal() +
+  labs(title = "Variance of BPRS over time")
+```
+
+It seems that the variance is decreasing over time, but not that significantly. In addition from time 1 to time 6 it is more or less constant (I guess that the high variance at the beginning is due to variability of the baseline values? This should be discussed a little bit better probably).
+
+Now look at the covariance matrix.
+
+```{r covariance matrix bprs}
+cov_matrix_bprs <- cov(alz[, c(18:24)], use = "pairwise.complete.obs")
+round(cov_matrix_bprs, 2)
+
+heatmap(cov_matrix_bprs, main = "Covariance matrix of BPRS")
+
+```
+
+
+It seems that the variance is decreasing over time and in addition it seems that the correlation between the variables decreases over time. So we could exploit this fact into our analysis. However the covariance stays really high even within 6 years difference: probably the measures over the years are extremely correlated to the baseline (and so also to other values).
+
+We can also have a look at the correlation matrix.
+
+```{r correlation bprs}
+cor_matrix_bprs <- cor(alz[, c(18:24)], use = "pairwise.complete.obs")
+round(cor_matrix_bprs, 2)
+
+heatmap(cor_matrix_bprs, main = "Correlation matrix of BPRS")
+```
+
+The correlation over time seems to be constant and almost equal to 1.
+
+
+# Summary Statistics (definitely to be fixed)
+
+Now we want to have a look at some possible summary statistics. The ones proposed during the lectures are:
+- analysis at each time point: could be interesting
+- analysis of area under the curve: doesn't seem particularly interesting
+- analysis of endpoints: don't know it doesn't take into consideration possible differences in the baseline and in addition not every patient is up to 6 years of measurements
+- analysis of increments: interesting
+- analysis of covariance: _non ho capito come funziona_
+
+
+## Analysis time points
+
+We can analyze each time separately (we have six of them). We could start from time point 0? Should it make sense?
+
+### Time point 0
+
+Should we try a linear regression? Should we try in a different way?
+
+```{r time point 0}
+mod_tp_0 <- lm(bprs0 ~ sex + age + edu + bmi +
+                 inkomen + job + adl + wzc + cdrsb0 + abpet0 + taupet0,
+               data = alz)
+
+summary(mod_tp_0)
+```
+
+Then we can analyze these results? We can get the significant variables? I don't know if there is anything else that could be interesting.
+
+Should we try something different?
+
+```{r time point 0 adl summ}
+## adl any 5
+alz$adl_disc <- (as.numeric(alz$adl) %/% 5) * 5
+alz$adl_disc <- as.factor(alz$adl_disc)
+
+mod_tp_0 <- lm(bprs0 ~ sex + age + edu + bmi +
+                 inkomen + job + adl_disc + wzc + cdrsb0 + abpet0 + taupet0,
+               data = alz)
+
+summary(mod_tp_0)
+```
+
+
+### Time point 1
+
+Should we try a linear regression? Should we try in a different way?
+
+```{r time point 1}
+mod_tp_1 <- lm(bprs1 ~ sex + age + edu + bmi +
+                 inkomen + job + adl + wzc + cdrsb0 + abpet0 + taupet0,
+               data = alz)
+
+summary(mod_tp_1)
+```
+
+Should we compare the results with other time points?
+
+### Time point 2
+
+Should we try a linear regression? Should we try in a different way?
+
+```{r time point 2}
+mod_tp_2 <- lm(bprs2 ~ sex + age + edu + bmi +
+                 inkomen + job + adl + wzc + cdrsb2 + abpet2 + taupet2,
+               data = alz)
+
+summary(mod_tp_2)
+```
+
+### Time point 3
+
+Should we try a linear regression? Should we try in a different way?
+
+```{r time point 3}
+mod_tp_3 <- lm(bprs3 ~ sex + age + edu + bmi +
+                 inkomen + job + adl + wzc + cdrsb3 + abpet3 + taupet3,
+               data = alz)
+
+summary(mod_tp_3)
+```
+
+### Time point 4
+
+Should we try a linear regression? Should we try in a different way?
+
+```{r time point 4}
+mod_tp_4 <- lm(bprs4 ~ sex + age + edu + bmi +
+                 inkomen + job + adl + wzc + cdrsb4 + abpet4 + taupet4,
+               data = alz)
+
+summary(mod_tp_4)
+```
+
+### Time point 5
+
+Should we try a linear regression? Should we try in a different way?
+
+```{r time point 5}
+mod_tp_5 <- lm(bprs5 ~ sex + age + edu + bmi +
+                 inkomen + job + adl + wzc + cdrsb5 + abpet5 + taupet5,
+               data = alz)
+
+summary(mod_tp_5)
+```
+
+### Time point 6
+
+Should we try a linear regression? Should we try in a different way?
+
+```{r time point 6}
+mod_tp_6 <- lm(bprs6 ~ sex + age + edu + bmi +
+                 inkomen + job + adl + wzc + cdrsb6 + abpet6 + taupet6,
+               data = alz)
+
+summary(mod_tp_6)
+```
+
+
+It seems that the $R^2$ value is decreasing over time to me. In addition we could analyze the different values of the parameter? I don't know...
+
+
+## Analysis of Area Under the Curve
+
+First of all we will create a few new data to work on.
+
+```{r alz without NA}
+## Remove NA in the bprs
+
+alz1 <- alz[!is.na(alz$bprs1),]
+alz2 <- alz1[!is.na(alz1$bprs2),]
+alz3 <- alz2[!is.na(alz2$bprs3),]
+alz4 <- alz3[!is.na(alz3$bprs4),]
+alz5 <- alz4[!is.na(alz4$bprs5),]
+alz6 <- alz5[!is.na(alz5$bprs6),]
+
+## Now we can compute the AUC values
+
+```
+
+
+## t-test
+
+```{r prova t test}
+t.test(alz[alz$sex == 1, ]$bprs1, alz[alz$sex == 0, ]$bprs1)
+```
+
+
+## Analysis of endpoints
+
+Probably it is better to look at the baseline values before going on with the analysis of endpoints.
+
+```{r hist}
+hist(alz$bprs0)
+hist(alz$cdrsb0)
+hist(alz$abpet0)
+hist(alz$taupet0)
+```
+
+The values are not exactly the same so I don't know if it could work. In addition we don't have the same endpoints? How could it work?
+Also we need to fix a little bit the data set (add the last biomarker measurement...)
+
+## Analysis of increments (da migliorare un po' ma idea base ci dovrebbe essere)
+
+We need to play with our dataset. We can create a new one because it is easier.
+
+```{r increments dataset}
+alz_inc <- alz
+
+# Compute the increments
+alz_inc$cdrsbinc0 <- rep(0, length(alz_inc$patid))
+alz_inc$cdrsbinc1 <- alz_inc$cdrsb1 - alz_inc$cdrsb0
+alz_inc$cdrsbinc2 <- alz_inc$cdrsb2 - alz_inc$cdrsb0
+alz_inc$cdrsbinc3 <- alz_inc$cdrsb3 - alz_inc$cdrsb0
+alz_inc$cdrsbinc4 <- alz_inc$cdrsb4 - alz_inc$cdrsb0
+alz_inc$cdrsbinc5 <- alz_inc$cdrsb5 - alz_inc$cdrsb0
+alz_inc$cdrsbinc6 <- alz_inc$cdrsb6 - alz_inc$cdrsb0
+
+alz_inc$bprsinc0 <- rep(0, length(alz_inc$patid))
+alz_inc$bprsinc1 <- alz_inc$bprs1 - alz_inc$bprs0
+alz_inc$bprsinc2 <- alz_inc$bprs2 - alz_inc$bprs0
+alz_inc$bprsinc3 <- alz_inc$bprs3 - alz_inc$bprs0
+alz_inc$bprsinc4 <- alz_inc$bprs4 - alz_inc$bprs0
+alz_inc$bprsinc5 <- alz_inc$bprs5 - alz_inc$bprs0
+alz_inc$bprsinc6 <- alz_inc$bprs6 - alz_inc$bprs0
+
+alz_inc$abpetinc0 <- rep(0, length(alz_inc$patid))
+alz_inc$abpetinc1 <- alz_inc$abpet1 - alz_inc$abpet0
+alz_inc$abpetinc2 <- alz_inc$abpet2 - alz_inc$abpet0
+alz_inc$abpetinc3 <- alz_inc$abpet3 - alz_inc$abpet0
+alz_inc$abpetinc4 <- alz_inc$abpet4 - alz_inc$abpet0
+alz_inc$abpetinc5 <- alz_inc$abpet5 - alz_inc$abpet0
+alz_inc$abpetinc6 <- alz_inc$abpet6 - alz_inc$abpet0
+
+alz_inc$taupetinc0 <- rep(0, length(alz_inc$patid))
+alz_inc$taupetinc1 <- alz_inc$taupet1 - alz_inc$taupet0
+alz_inc$taupetinc2 <- alz_inc$taupet2 - alz_inc$taupet0
+alz_inc$taupetinc3 <- alz_inc$taupet3 - alz_inc$taupet0
+alz_inc$taupetinc4 <- alz_inc$taupet4 - alz_inc$taupet0
+alz_inc$taupetinc5 <- alz_inc$taupet5 - alz_inc$taupet0
+alz_inc$taupetinc6 <- alz_inc$taupet6 - alz_inc$taupet0
+
+## Now go back to the dataframe structure
+alz_inc_df <- data.frame(alz_inc)
+
+alz_inc_long <- alz_inc_df %>%
+  pivot_longer(
+    # 1️⃣ Seleziona tutte le colonne che iniziano con cdrsb, abpet o taupet,
+    #     seguite da un numero (0–6)
+    cols = matches("^(bprs|cdrsb|abpet|taupet|bprsinc|cdrsbinc|abpetinc|taupetinc)\\d+$"),
+    
+    # 2️⃣ Crea due nuove colonne:
+    #     - ".value" → il prefisso (cdrsb, abpet, taupet)
+    #     - "year"   → il numero alla fine
+    names_to = c(".value", "year"),
+    
+    # 3️⃣ Divide i nomi in due parti: (prefisso, numero)
+    names_pattern = "(bprs|cdrsb|abpet|taupet|bprsinc|cdrsbinc|abpetinc|taupetinc)(\\d+)"
+  ) %>%
+  mutate(
+    year = as.numeric(year),                            # converte in numerico
+    sample = factor(rep(1:nrow(alz_inc_df), each = 7)) # ID per ogni paziente
+  )
+```
+
+Now we can work a little bit on the results.
+
+```{r increments results}
+## General behavior
+
+ggplot(alz_inc_long, aes(x = year, y = bprsinc)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+               alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior")
+
+ggplot(alz_inc_long, aes(x = year, y = bprsinc, group = sex, color = sex)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+               alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt sex")
+
+ggplot(alz_inc_long, aes(x = year, y = bprsinc, group = age, color = age)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  #stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+  #             alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt age")
+
+ggplot(alz_inc_long, aes(x = year, y = bprsinc, group = edu, color = edu)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  #stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+  #             alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt edu")
+
+ggplot(alz_inc_long, aes(x = year, y = bprsinc, group = wzc, color = wzc)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+               alpha = 0.2, fill = "lightblue") +
+  theme_minimal() +
+  labs(title = "General mean behavior wrt wzc")
+
+```
+
+_Complete any combination..._
+
+It seems that the slopes are the same for any group: this is coherent with our previous conclusions!
+
+
+# Multivariate Model
+
+Now we want to try to fit a multivariate model to our data.
+
+```{r libraries multivariate model}
+library(nlme)
+library(lmtest)
+library(DescTools)
+```
+
+We can start by fitting for example the most general model that includes everything. We will use the AR(1) covariance structure because it is too complex to fit otherwise. The problem here is that we also need to reduce the number of parameters to fit (because it is too complex otherwise).
+
+```{r mult model 1}
+mult_model_1 <- gls(
+  bprs ~ age + edu + bmi + inkomen + adl + wzc + cdrsb_base + ab_base + tau_base +
+    (sex + job) * year ,
+  correlation = corAR1(form = ~ year | sample),  # struttura UN
+  method = "ML",
+  data = alz_long,
+  na.action = na.exclude
+)
+
+mult_model_1$coefficients
+```
+
+```{r moda}
+moda <- function(x) {
+  x <- na.omit(x)
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+```
+
+IDEA: calcola valori medi e la moda e confronta i vari risultati con la media generica
+
+```{r mean values}
+sex_moda <- moda(alz$sex)
+age_mean <- mean(alz$age)
+edu_moda <- moda(alz$edu)
+bmi_mean <- mean(alz$bmi)
+ink_mean <- mean(alz$inkomen)
+job_moda <- moda(alz$job)
+adl_moda <- moda(alz$adl)
+wzc_moda <- moda(alz$wzc)
+cdrsb_mean <- mean(alz$cdrsb0)
+ab_mean <- mean(alz$abpet0)
+tau_mean <- mean(alz$taupet0)
+
+mean_values <- c(sex_moda, age_mean, edu_moda, bmi_mean, ink_mean, job_moda,
+                 adl_moda, wzc_moda, cdrsb_mean, ab_mean, tau_mean)
+
+## Build a dataframe to predict the values
+anni <- 2020:2025
+
+# Costruisci il data frame di predizione
+
+anni <- 0:6
+
+mean_df <- data.frame(
+  sex = factor(rep(sex_moda, 7), levels = levels(alz_long$sex)),
+  age = rep(age_mean, 7),
+  edu = factor(rep(edu_moda, 7), levels = levels(alz_long$edu)),
+  bmi = rep(bmi_mean, 7),
+  inkomen = rep(ink_mean, 7),
+  job = factor(rep(job_moda, 7), levels = levels(alz_long$job)),
+  adl = factor(rep(adl_moda, 7), levels = levels(alz_long$adl)),
+  wzc = factor(rep(wzc_moda, 7), levels = levels(alz_long$wzc)),
+  bprs = c(mean(alz$bprs0), mean(na.omit(alz$bprs1)), mean(na.omit(alz$bprs2)),
+           mean(na.omit(alz$bprs3)), mean(na.omit(alz$bprs4)), 
+           mean(na.omit(alz$bprs5)), mean(na.omit(alz$bprs6))),
+  cdrsb_base = rep(cdrsb_mean, 7),
+  ab_base = rep(ab_mean, 7),
+  tau_base = rep(tau_mean, 7),
+  year = anni,
+  sample = rep("media", 7)  # oppure un valore valido esistente in alz_long$sample
+)
+```
+
+Now we can predict the mean values over time
+
+```{r prediction multi_model_1}
+mean_df$pred_multi_1 <- predict(mult_model_1, mean_df)
+
+ggplot(mean_df, aes(x = year, y = pred_multi_1)) +
+  geom_line(data = alz_rist_long, 
+            aes(x = year, y = bprs, group = sample, color = sample), alpha = 0.4,
+            show.legend = FALSE) +
+  geom_point(data = mean_df, aes(x = year, y = bprs), color = "red") +
+  geom_line(alpha = 1, show.legend = FALSE) +
+  geom_point() +
+  theme_minimal()
+```
+
+It seems that it does not predict well over time. Now we can compare for example different groups.
+
+```{r comparison multi_model_1}
+df_prova_1 <- mean_df
+df_prova_1$sex <- factor(rep(0, 7), levels = levels(alz_long$sex))
+df_prova_1$pred_multi_1 <- predict(mult_model_1, df_prova_1)
+
+## Comparison
+ggplot(alz_long, aes(x = year, y = bprs, group = sex, color = sex)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  #stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+  #             alpha = 0.2, fill = "lightblue") +
+  geom_point(data = mean_df, aes(x = year, y = pred_multi_1), color = "pink") +
+  geom_line(data = mean_df, aes(x = year, y = pred_multi_1), color = "pink") +
+  geom_point(data = df_prova_1, aes(x = year, y = pred_multi_1), color = "orange") +
+  geom_line(data = df_prova_1, aes(x = year, y = pred_multi_1), color = "orange") +
+  theme_minimal()
+
+```
+
+For example this is not captured really well.
+
+```{r}
+df_prova_2 <- mean_df
+df_prova_2$job <- factor(rep(1, 7), levels = levels(alz_long$sex))
+df_prova_2$pred_multi_1 <- predict(mult_model_1, df_prova_2)
+
+## Comparison
+ggplot(alz_long, aes(x = year, y = bprs, group = job, color = job)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  #stat_summary(fun.data = mean_sdl, geom = "ribbon", fun.args = list(mult = 1),
+  #             alpha = 0.2, fill = "lightblue") +
+  geom_point(data = mean_df, aes(x = year, y = pred_multi_1), color = "pink") +
+  geom_line(data = mean_df, aes(x = year, y = pred_multi_1), color = "pink") +
+  geom_point(data = df_prova_2, aes(x = year, y = pred_multi_1), color = "orange") +
+  geom_line(data = df_prova_2, aes(x = year, y = pred_multi_1), color = "orange") +
+  theme_minimal()
+```
+
+For example for job it works way better.
+
+We coudld do something similar also with other variables.
+
+
+## Parsimonious model
+
+Now we would like to derive a more parsimonious model. From the p-values of the first model i would start by trying to remove the inkomen value.
+
+```{r mult model 2}
+mult_model_2 <- gls(
+  bprs ~ age + edu + bmi + inkomen + adl + wzc + cdrsb_base + ab_base + tau_base +
+    (sex + job) * year ,
+  correlation = corAR1(form = ~ year | sample),  # struttura UN
+  method = "ML",
+  data = alz_long,
+  na.action = na.exclude
+)
+
+AIC(mult_model_1, mult_model_2)
+```
+
+**MMM MISSA CHE SONO GIA ARRIVATO IO AL MODELLO PIU PARSIMONIOSO DALL'EXPLORATORY DATA ANALYSIS...**
+
+
+
+
