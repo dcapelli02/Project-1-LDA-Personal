@@ -23,6 +23,7 @@ alz$edu <- as.factor(alz$edu)
 alz$job <- as.factor(alz$job)
 alz$wzc <- as.factor(alz$wzc)
 alz$adl <- as.factor(alz$adl)
+alz$adl_num <- as.numeric(alz$adl)
 
 ## Create baseline values
 alz$ab_base <- alz$abpet0
@@ -90,121 +91,6 @@ alz$adl_disc <- as.factor(alz$adl_disc)
 ## year discrete
 alz_long$year_seq <- ave(alz_long$year, alz_long$sample, FUN = function(x) as.integer(factor(x)))
 
-#### 2 STAGE MODEL ####
-
-### STAGE 1 MODEL ###
-
-## Start by fitting any time a linear regression
-
-count <- 0
-coeff_stage1 <- matrix(nrow = length(alz$patid), ncol = 2)
-sigma_stage_1 <- matrix(nrow = length(alz$patid), ncol = 1)
-
-# We assume basically that bprs_i = beta_0i + beta_1i * year_i + eps_i
-# We should define a structure for the errors
-# Usually it is reasonable to consider esp_i ~ N(0, Sigma)
-# and Sigma = sigma^2 * I
-
-for (i in 1:length(alz$patid)) {
-  mod_prova <- lm(bprs ~ year, 
-                  data = alz_long[c((7*count + 1) : (7*count + 7)), ])
-  coeff_stage1[i, ] <- mod_prova$coefficients
-  sigma_prov <- sqrt(sum(residuals(mod_prova)^2) / df.residual(mod_prova))
-  sigma_stage_1[i] <- sigma_prov
-  count = count + 1
-}
-
-# Here the stage 1 model is over
-
-### STAGE 2 MODEL ###
-
-## First of all store the results
-beta0 <- coeff_stage1[, 1]
-beta1 <- coeff_stage1[, 2]
-
-## Then we can perform a regression
-
-## Here usually we consider the matrix of errors D to be unstructured
-## so we need to use gls and not lm
-
-## In order to use it we need to construct a new dataframe
-## (otherwise gls does not work properly)
-
-alz$beta0 <- beta0
-alz$beta1 <- beta1
-
-alz_long_beta <- alz %>%
-  mutate(id = row_number()) %>%
-  select(id, sex, job, age, inkomen, adl_disc, wzc,
-         ab_base, tau_base, edu, bmi, cdrsb_base, beta0, beta1) %>%
-  pivot_longer(cols = c(beta0, beta1),
-               names_to = "param",
-               values_to = "beta")
-
-alz_long_beta$param <- as.factor(alz_long_beta$param)
-
-model_2stage <- gls(beta ~ param + sex + job + age + inkomen +
-                      adl_disc + wzc + ab_base + tau_base +
-                      edu + bmi + cdrsb_base,
-                    data = alz_long_beta,
-                    correlation = corSymm(form = ~ 1 | id),
-                    weights     = varIdent(form = ~ 1 | param),
-                    method      = "ML",
-                    na.action   = na.exclude)
-
-model_2stage$coefficients
-
-## Then I should reduce the model?
-## But if I do like this I do not take into consideration that I would like
-## to exclude different covariates for beta0 and beta1...
-
-## Actually, if we proceed in this way we need to take into consideration
-## the same regressors both for beta0 and beta1
-
-## So I prefer to run a lm regression for both the variables, maybe by simply
-## considering a different weight for the estimations carried on by the 
-## fact that we are considering estimates from a model
-
-## Fix the NA values
-# sostituisci NA/0 con un piccolo valore, ad esempio
-sigma_stage_1_clean <- ifelse(is.na(sigma_stage_1) | sigma_stage_1 == 0,
-                              min(sigma_stage_1[sigma_stage_1 > 0], na.rm=TRUE),
-                              sigma_stage_1)
-
-weights_lm <- 1 / sigma_stage_1_clean^2
-
-model_beta0 <- lm(beta0 ~ sex + job + age + inkomen + 
-                    adl_disc + wzc + ab_base + tau_base +
-                    edu + bmi + cdrsb_base,
-                  weights = weights_lm,
-                  data = alz)
-
-model_beta1 <- lm(beta1 ~ sex + job + age + inkomen + 
-                    adl_disc + wzc + ab_base + tau_base +
-                    edu + bmi + cdrsb_base,
-                  weights = weights_lm,
-                  data = alz)
-
-## So these are the starting points
-## We want to reduce the models
-
-step(model_beta0)
-
-model_beta0_final <- lm(formula = beta0 ~ sex + age + adl_disc + wzc + ab_base + edu + 
-                          bmi + cdrsb_base, 
-                        data = alz, 
-                        #weights = weights_lm
-                        )
-
-step(model_beta1)
-
-model_beta1_final <- lm(formula = beta1 ~ sex + inkomen + adl_disc + edu + bmi + cdrsb_base, 
-                  data = alz,
-                  #weights = weights_lm
-                  )
-
-coeff_beta0_final <- model_beta0_final$coefficients
-coeff_beta1_final <- model_beta1_final$coefficients
 
 
 #### LINEAR MIXED MODEL ####
@@ -225,7 +111,7 @@ coeff_beta1_final <- model_beta1_final$coefficients
 ## A good starting point is to keep any variable and an unstructured covariance structure
 
 lme_model_1_full <- lme(bprs ~ (sex + age + edu + bmi + inkomen + job +
-                                  adl_disc + wzc + cdrsb_base +
+                                  adl_num + wzc + cdrsb_base +
                                   ab_base + tau_base) * year,
                         data = alz_long,
                         random = ~ year_seq | sample,
@@ -233,4 +119,30 @@ lme_model_1_full <- lme(bprs ~ (sex + age + edu + bmi + inkomen + job +
                         weights = varIdent(form = ~ 1 | year_seq),
                         na.action = na.omit)
 
-## NO: MODELLO TROPPO PESANTE
+## MODELLO TROPPO PESANTE DA ESEGUIRE: non arriva a convergenza
+## Come fare per ridurre il tutto?
+## Quale potrebbe essere una buona idea?
+
+## Secondo me una buona idea è partire da struttura di covarianza AR(1)
+
+lme_model_1_full_AR <- lme(bprs ~ (sex + age + edu + bmi + inkomen + job +
+                                  adl_num + wzc + cdrsb_base +
+                                  ab_base + tau_base) * year,
+                        data = alz_long,
+                        random = ~ year_seq | sample,
+                        correlation = corAR1(form = ~ year_seq | sample),
+                        weights = varIdent(form = ~ 1 | year_seq),
+                        na.action = na.omit)
+
+## Questo ha raggiunto convergenza
+
+summary(lme_model_1_full_AR)
+
+## A livello di baseline: toglierei (forse sex), edu, inkomen, ab (da vedere),
+## tau
+
+## A livello di intercetta: toglierei forse sex, edu, bmi, wzc, ab e tau
+
+## Però sono cose che vanno testate?
+
+

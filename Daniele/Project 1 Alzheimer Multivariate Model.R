@@ -155,6 +155,26 @@ anova(mult_model_final, mult_model_final_exp)
 
 ## I can pick the one I want so I will stick to my choice of AR1
 
+### ALTRA PROVA ###
+
+## What does it happen if we stick to the model I inferred from the EDA?
+
+model_nostro <- gls(
+  bprs ~ age + inkomen + bmi + tau_base +
+    (bmi + job + adl_disc + wzc + sex + ab_base)*year - bmi,
+  correlation = corAR1(form = ~ year | sample),
+  weights = varIdent(form = ~ 1 | year),
+  method = "ML",
+  data = alz_long,
+  na.action = na.exclude
+)
+
+## LR Test to compare the results
+
+lrtest(mult_model_final, model_nostro)
+anova(mult_model_final, model_nostro)
+
+## No we should keep the model we found
 
 
 #### VECCHIA COPIA DI BACKUP ####
