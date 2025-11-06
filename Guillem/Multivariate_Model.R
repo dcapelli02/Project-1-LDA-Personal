@@ -4,6 +4,7 @@ library(dplyr)
 library(tidyr)
 library(ggplot2)
 library(ggcorrplot)
+library(nlme)
 
 # Llegir dades
 alz <- read_sas("C:/Users/win11/Documents/Guillem/Erasmus/Assignatures/Longitudinal Data Analysis/Project-1-LDA-Personal/alzheimer25.sas7bdat")
@@ -15,6 +16,10 @@ alz$edu <- factor(alz$edu, levels = c(1,2,3,4),
                   labels = c("Primary Ed.", "Lower Secondary Ed.", "Upper Secondary Ed.", "Higher Ed."))
 alz$job <- factor(alz$job, levels = c(0, 1), labels = c("No job", "Job"))
 alz$wzc <- factor(alz$wzc, levels = c(0, 1), labels = c("Home", "Residence"))
+
+alz$abpet_base <- alz$abpet0
+alz$taupet_base <- alz$taupet0
+alz$cdrsb_base <- alz$cdrsb0
 
 # Transformar a long format
 alz_long <- pivot_longer(
@@ -77,3 +82,64 @@ for (var in vars_long) {
                title = paste("Correlation structure of", var, "over years"))
   )
 }
+
+
+#Multivariate Model
+
+
+model_gls_1 <- gls(
+  bprs ~ trial + sex + age + edu + bmi + inkomen + job + adl + wzc + cdrsb_base + 
+    abpet_base + taupet_base + (trial + sex + age + edu + bmi + inkomen + 
+        job + adl + wzc + cdrsb_base + abpet_base + taupet_base) * year,
+  
+  correlation = corAR1(form = ~ year | patid),
+  weights = varIdent(form = ~ 1 | year),
+  data = alz_long,
+  method = "ML",
+  na.action = na.exclude
+)
+
+
+model_gls_2 <- gls(
+  bprs ~ trial + sex + age + edu + job + adl + wzc + cdrsb_base + 
+    (sex + age + job + adl + wzc + cdrsb_base) * year,
+  
+  correlation = corAR1(form = ~ year | patid),
+  weights = varIdent(form = ~ 1 | year),
+  data = alz_long,
+  method = "ML",
+  na.action = na.exclude
+)
+
+model_gls_3 <- gls(
+  bprs ~ trial + sex + age + adl + job + (wzc + cdrsb_base) * year,
+  
+  correlation = corAR1(form = ~ year | patid),
+  weights = varIdent(form = ~ 1 | year),
+  data = alz_long,
+  method = "ML",
+  na.action = na.exclude
+)
+
+#Without Trial - It has larger BIC 
+model_gls_4 <- gls(
+  bprs ~ sex + age + adl + job + (wzc + cdrsb_base) * year,
+  
+  correlation = corAR1(form = ~ year | patid),
+  weights = varIdent(form = ~ 1 | year),
+  data = alz_long,
+  method = "ML",
+  na.action = na.exclude
+)
+
+anova(model_gls_1, model_gls_2, model_gls_3, model_gls_4)
+
+
+#alz_long <- alz_long %>%
+#  arrange(patid, year) %>%
+#  group_by(patid) %>%
+#  mutate(year_seq = row_number()) %>%
+#  ungroup()
+
+
+
