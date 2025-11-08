@@ -26,6 +26,7 @@ alz$edu <- as.factor(alz$edu)
 alz$job <- as.factor(alz$job)
 alz$wzc <- as.factor(alz$wzc)
 alz$adl <- as.factor(alz$adl)
+alz$adl_num <- as.numeric(alz$adl)
 
 ## Create baseline values
 alz$ab_base <- alz$abpet0
@@ -102,7 +103,7 @@ alz_long$year_seq <- ave(alz_long$year, alz_long$sample, FUN = function(x) as.in
 ## Maybe try to use heterogeneous AR(1) as a starting point
 
 mult_model_1 <- gls(
-  bprs ~ (age + edu + bmi + inkomen + adl_disc + wzc + cdrsb_base + ab_base + tau_base +
+  bprs ~ (trial + age + edu + bmi + inkomen + adl_num + wzc + cdrsb_base + ab_base + tau_base +
     sex + job) * year ,
   correlation = corAR1(form = ~ year | sample),
   weights = varIdent(form = ~ 1 | year),
@@ -120,20 +121,111 @@ mult_model_1$coefficients
 summary(mult_model_1)
 
 ### ALTERNATIVA: computationally long
-#library(MASS)
-#stepAIC(mult_model_1)
+library(MASS)
+# Try to fit it with the forward option
 
-mult_model_final <- gls(
-  bprs ~ age + edu + bmi + inkomen + adl_disc + wzc + cdrsb_base + 
-    ab_base + tau_base + sex + job + year + age:year + edu:year +
-    inkomen:year + wzc:year + cdrsb_base:year + ab_base:year +
-    sex:year,
+mult_model_naive <- gls(
+  bprs ~ 1,
   correlation = corAR1(form = ~ year | sample),
   weights = varIdent(form = ~ 1 | year),
   method = "ML",
   data = alz_long,
   na.action = na.exclude
 )
+
+step_trial <- stepAIC(mult_model_naive, 
+                      direction = "forward",
+                      scope = list(lower = ~1, 
+                                   upper = formula(mult_model_1)),
+                      trace = TRUE)
+
+mult_model_final <- gls(
+  bprs ~ year + age + trial + adl_num + wzc + cdrsb_base + bmi + 
+    job + year:cdrsb_base + year:wzc,
+  correlation = corAR1(form = ~ year | sample),
+  weights = varIdent(form = ~ 1 | year),
+  method = "ML",
+  data = alz_long,
+  na.action = na.exclude
+)
+
+## It could be interesting to compare it to the model we were thinking
+## from the EDA
+
+mult_model_eda <- gls(
+  bprs ~ trial + sex + age + bmi + inkomen + job + adl_num + wzc + ab_base + tau_base +
+    year + job:year + adl_num:year + wzc:year,
+  correlation = corAR1(form = ~ year | sample),
+  weights = varIdent(form = ~ 1 | year),
+  method = "ML",
+  data = alz_long,
+  na.action = na.exclude
+)
+
+
+AIC(mult_model_final, mult_model_eda)
+BIC(mult_model_final, mult_model_eda)
+lrtest(mult_model_final, mult_model_eda)  # che in realtà non so se abbia senso
+
+## Let us keep our model
+
+
+### DIFFERENT COVARIANCE ###
+
+## Simple diagonal cov matrix
+
+mult_model_final_naive <- gls(
+  bprs ~ year + age + trial + adl_num + wzc + cdrsb_base + bmi + 
+    job + year:cdrsb_base + year:wzc,
+  #correlation = corAR1(form = ~ year | sample),
+  #weights = varIdent(form = ~ 1 | year),
+  method = "ML",
+  data = alz_long,
+  na.action = na.exclude
+)
+
+anova(mult_model_final, mult_model_final_naive)
+
+## Definitely no
+
+## Different elements on the diagonal
+
+mult_model_final_naive <- gls(
+  bprs ~ year + age + trial + adl_num + wzc + cdrsb_base + bmi + 
+    job + year:cdrsb_base + year:wzc,
+  #correlation = corAR1(form = ~ year | sample),
+  weights = varIdent(form = ~ 1 | year),
+  method = "ML",
+  data = alz_long,
+  na.action = na.exclude
+)
+
+anova(mult_model_final, mult_model_final_naive)
+
+## No
+
+## Exponential?
+
+mult_model_final_un <- gls(
+  bprs ~ year + age + trial + adl_num + wzc + cdrsb_base + bmi + 
+    job + year:cdrsb_base + year:wzc,
+  correlation = corExp(form = ~ year | sample),
+  weights = varIdent(form = ~ 1 | year),
+  method = "ML",
+  data = alz_long,
+  na.action = na.exclude
+)
+
+anova(mult_model_final, mult_model_final_un)
+
+## Basically the same
+
+## We could go with our final model above??
+
+
+
+#### BACKUP ####
+
 
 ## DIFFERENCE COVARIANCE STRUCTURE ##
 
@@ -450,3 +542,58 @@ mult_model_3 <- gls(
 anova(mult_model_2, mult_model_3)
 
 ## Ok so this is our final model we did not reduce particularly the mean strcuture, why??
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Estrai i coefficienti di varIdent
+var_weights <- coef(mult_model_final$modelStruct$varStruct)
+
+# Varianza base (livello di riferimento)
+base_var <- mult_model_final$sigma^2
+
+# Tutti i livelli di year
+anni <- sort(unique(alz_long$year))
+
+# Calcola varianza per ciascun anno
+varianze <- sapply(anni, function(y) {
+  if (as.character(y) %in% names(var_weights)) {
+    base_var * var_weights[as.character(y)]^2
+  } else {
+    base_var  # livello di riferimento
+  }
+})
+
+# Crea un data frame per il plot
+df_var <- data.frame(year = anni, varianza = varianze)
+
+# Plot con ggplot2
+ggplot(df_var, aes(x = year, y = varianza)) +
+  geom_line(color = "darkblue", size = 1.2) +
+  geom_point(color = "black", size = 2) +
+  labs(title = "Varianza residua predetta di BPRS nel tempo",
+       x = "Anno",
+       y = "Varianza residua") +
+  theme_minimal()
+
