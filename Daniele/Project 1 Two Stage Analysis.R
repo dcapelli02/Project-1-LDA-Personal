@@ -9,6 +9,8 @@ library(corrplot)
 library(nlme)
 library(lmtest)
 library(DescTools)
+library(Matrix)
+library(MASS)
 
 ## Import and fix the data
 alz <- read_sas("C:/Users/Daniele/Desktop/2025 - 26 Primo Semestre/Longitudinal Data Analysis/Project 1 Alzheimer LDA/alzheimer25.sas7bdat")
@@ -96,6 +98,373 @@ alz_long$year_seq <- ave(alz_long$year, alz_long$sample, FUN = function(x) as.in
 ### STAGE 1 MODEL ###
 
 ## Start by fitting any time a linear regression
+
+count <- 0
+coeff_stage1 <- matrix(nrow = length(alz$patid), ncol = 2)
+sigma_stage_1 <- matrix(nrow = length(alz$patid), ncol = 1)
+r2_stage1 <- matrix(nrow = length(alz$patid), ncol = 1)
+r2_stage1_quad <- matrix(nrow = length(alz$patid), ncol = 1)
+sum_squares <- matrix(nrow = length(alz$patid), ncol = 3)
+
+# We assume basically that bprs_i = beta_0i + beta_1i * year_i + eps_i
+# We should define a structure for the errors
+# Usually it is reasonable to consider esp_i ~ N(0, Sigma)
+# and Sigma = sigma^2 * I
+
+for (i in 1:(length(alz$patid))) {
+  idx <- (7 * i + 1):(7 * i + 7)
+  bprs_values <- alz_long$bprs[idx]
+  mean_bprs <- mean(bprs_values, na.rm = TRUE)
+  sum_squares[i, 1] <- sum((bprs_values - mean_bprs)^2, na.rm = TRUE)
+  mod_prova <- lm(bprs ~ year, 
+                  data = alz_long[c((7*count + 1) : (7*count + 7)), ])
+  mod_prova_quad <- lm(bprs ~ year + I(year^2), 
+                       data = alz_long[c((7*count + 1) : (7*count + 7)), ])
+  coeff_stage1[i, ] <- mod_prova$coefficients
+  r2_stage1[i] <- summary(mod_prova)$r.squared
+  r2_stage1_quad[i] <- summary(mod_prova_quad)$r.squared
+  sigma_prov <- sqrt(sum(residuals(mod_prova)^2) / df.residual(mod_prova))
+  sigma_stage_1[i] <- sigma_prov
+  sum_squares[i, 2] <- sum(residuals(mod_prova)^2)
+  sum_squares[i, 3] <- sum(residuals(mod_prova_quad)^2)
+  count = count + 1
+}
+
+## Quick visualization of the data
+
+r_squared_meta <- 1 - (sum(sum_squares[, 2], na.rm = TRUE) / sum(sum_squares[, 1], na.rm = TRUE))
+r_squared_meta_quad <- 1 - (sum(sum_squares[, 3], na.rm = TRUE) / sum(sum_squares[, 1], na.rm = TRUE))
+
+## Value really high, not that bad
+
+# Visualization
+
+r_squared_visual <- data.frame(
+  n_obs = alz$n_obs_data,
+  r2_stage1 = r2_stage1
+)
+
+r_squared_visual_quad <- data.frame(
+  n_obs = alz$n_obs_data,
+  r2_stage1 = r2_stage1_quad
+)
+
+ggplot(r_squared_visual, aes(x = n_obs, y = r2_stage1)) +
+  geom_point(alpha = 0.6, color = "blue", size = 2) +
+  geom_hline(yintercept = r_squared_meta, linetype = "dashed", color = "red", size = 1) +
+  labs(
+    title = "Scatterplot of R² under Linear Model",
+    x = "Number n_i of measurements",
+    y = "Coefficient Ri²"
+  ) +
+  scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2)) +
+  theme_minimal() +
+  theme(
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(hjust = 0.5)
+  )
+
+ggplot(r_squared_visual_quad, aes(x = n_obs, y = r2_stage1)) +
+  geom_point(alpha = 0.6, color = "blue", size = 2) +
+  geom_hline(yintercept = r_squared_meta_quad, linetype = "dashed", color = "red", size = 1) +
+  labs(
+    title = "Scatterplot of R² under Quadratic Model",
+    x = "Number n_i of measurements",
+    y = "Coefficient Ri²"
+  ) +
+  scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2)) +
+  theme_minimal() +
+  theme(
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(hjust = 0.5)
+  )
+
+### COMPARAZIONE MODELLI - F TEST 
+
+## Prova veloce
+
+# Totali aggregati
+SSE_L <- sum(sum_squares[, 2], na.rm = TRUE)
+SSE_Q <- sum(sum_squares[, 3], na.rm = TRUE)
+
+df_L <- sum(alz$n_obs_data - 2)               # due parametri: beta0, beta1
+df_Q <- sum(alz$n_obs_data - 3)               # tre parametri: beta0, beta1, beta2
+
+# F-test aggregato
+F_meta <- ((SSE_L - SSE_Q) / (df_L - df_Q)) / (SSE_Q / df_Q)
+p_meta <- 1 - pf(F_meta, df_L - df_Q, df_Q)
+
+cat("F_meta =", F_meta, "  p-value =", p_meta, "\n")
+
+# Here the stage 1 model is over
+
+
+### STAGE 2 MODEL ###
+
+## We can group beta0 and beta1
+
+## First of all store the results
+beta0 <- coeff_stage1[, 1]
+beta1 <- coeff_stage1[, 2]
+
+
+## Tutto numerico
+alz_prova <- read_sas("C:/Users/Daniele/Desktop/2025 - 26 Primo Semestre/Longitudinal Data Analysis/Project 1 Alzheimer LDA/alzheimer25.sas7bdat")
+
+## Group them into a single vector
+y <- as.vector((cbind(beta0, beta1)))
+
+Z <- model.matrix(~ trial + sex + job + age + inkomen + 
+                    adl + wzc + abpet0 + taupet0 +
+                    edu + bmi + cdrsb0, data = alz_prova)
+
+block_Z <- kronecker(diag(2), Z)
+
+colnames(block_Z) <- c(
+  paste0(colnames(Z), "_int"),   # per il primo blocco (intercept)
+  paste0(colnames(Z), "_time")   # per il secondo blocco (slope)
+)
+
+alz_long2 <- data.frame(
+  sample = rep(alz$patid, 2),
+  coef_type = factor(c(rep("beta0", times = nrow(alz)), rep("beta1", times = nrow(alz)))),
+  y = y,
+  block_Z = block_Z  # o puoi ricostruire con model.matrix
+)
+
+names(alz_long2) <- sub("^block_Z\\.", "", names(alz_long2))
+
+alz_long2$trial_int <- as.factor(alz_long2$trial_int)
+alz_long2$sex_int <- as.factor(alz_long2$sex_int)
+alz_long2$edu_int <- as.factor(alz_long2$edu_int)
+alz_long2$job_int <- as.factor(alz_long2$job_int)
+alz_long2$wzc_int <- as.factor(alz_long2$wzc_int)
+
+alz_long2$trial_time <- as.factor(alz_long2$trial_time)
+alz_long2$sex_time <- as.factor(alz_long2$sex_time)
+alz_long2$edu_time <- as.factor(alz_long2$edu_time)
+alz_long2$job_time <- as.factor(alz_long2$job_time)
+alz_long2$wzc_time <- as.factor(alz_long2$wzc_time)
+
+## Questo è da ridurre perchè non fitta tutto a quanto pare...
+
+mod_2_full <- gls(y ~ . - 1 - sample - coef_type - trial_time - edu_int - edu_time
+                  - trial_int - age_int,
+                  correlation = corSymm(form = ~ 1 | sample),
+                  weights = varIdent(form = ~ 1 | coef_type),
+                  method = "ML",
+                  na.action = na.exclude,
+                  data = alz_long2)
+
+mod_2_naive <- gls(y ~ .Intercept._time + .Intercept._int - 1,
+                                 correlation = corSymm(form = ~ 1 | sample),
+                                 weights = varIdent(form = ~ 1 | coef_type),
+                                 method = "ML",
+                                 na.action = na.exclude,
+                                 data = alz_long2)
+
+## Stepwise procedure
+
+step_stage2 <- stepAIC(mod_2_naive, 
+                       direction = "forward",
+                       scope = list(lower = ~ .Intercept._time + .Intercept._int - 1, 
+                                    upper = formula(mod_2_full)),
+                       trace = TRUE)
+
+
+
+
+
+###################### FINO QUA ###################################
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#### ALTRO TENTATIVO ####
+## Now create a new dataset with the beta0 and beta1 values
+
+alz_long_beta <- cbind(
+  cbind(alz, coef_type = "int",  y = beta0),
+  cbind(alz, coef_type = "time", y = beta1)
+)
+
+alz_long_beta$coef_type <- as.factor(alz_long_beta$coef_type)
+
+## Then fit a gls to this model
+
+mod2_full <- gls(
+  y ~ coef_type * (trial + sex + job + age + inkomen + 
+                     adl_num + wzc + ab_base + tau_base +
+                     edu + bmi + cdrsb_base) - 1,
+  correlation = corSymm(form = ~ 1 | patid),
+  weights = varIdent(form = ~ 1 | coef_type),
+  data = alz_long_beta,
+  na.action = na.exclude,
+  method = "ML"
+)
+
+
+## Then stepwise procedure
+
+mod2_naive <- gls(
+  y ~ 1,
+  correlation = corSymm(form = ~ 1 | patid),
+  weights = varIdent(form = ~ 1 | coef_type),
+  data = alz_long_beta,
+  na.action = na.exclude,
+  method = "ML"
+)
+
+
+step2 <- stepAIC(mod2_naive, 
+                 direction = "forward",
+                 scope = list(lower = ~1, 
+                              upper = formula(mod2_full)),
+                 trace = TRUE)
+
+
+
+
+
+
+
+
+
+
+
+## Then create a new block matrix
+Z <- model.matrix(~ trial + sex + job + age + inkomen + 
+                    adl_num + wzc + ab_base + tau_base +
+                    edu + bmi + cdrsb_base, data = alz)
+
+block_Z <- kronecker(diag(2), Z)
+
+colnames(block_Z) <- c(
+  paste0(colnames(Z), "_int"),   # per il primo blocco (intercept)
+  paste0(colnames(Z), "_time")   # per il secondo blocco (slope)
+)
+
+alz_long2 <- data.frame(
+  id = rep(alz$patid, each = 2),
+  coef_type = factor(rep(c("beta0", "beta1"), times = nrow(alz))),
+  y = y,
+  block_Z = block_Z  # o puoi ricostruire con model.matrix
+)
+
+## Then we can fit a gls to this model,
+## we want to impose a generic covariance structure
+
+mod_2_full <- gls(y ~ block_Z - 1,
+                  correlation = corSymm(form = ~ 1 | id),
+                  weights = varIdent(form = ~ 1 | coef_type),
+                  method = "ML",
+                  na.action = na.exclude,
+                  data = alz_long2)
+
+mod_2_naive <- mod_2_full <- gls(y ~ 1,
+                                 correlation = corSymm(form = ~ 1 | id),
+                                 weights = varIdent(form = ~ 1 | coef_type),
+                                 method = "ML",
+                                 na.action = na.exclude,
+                                 data = alz_long2)
+
+## Stepwise procedure
+
+step_stage2 <- stepAIC(mod_2_naive, 
+                      direction = "forward",
+                      scope = list(lower = ~1, 
+                                   upper = formula(mod_2_full)),
+                      trace = TRUE)
+
+
+
+
+
+
+## First of all store the results
+beta0 <- coeff_stage1[, 1]
+beta1 <- coeff_stage1[, 2]
+
+model_beta0 <- lm(beta0 ~ trial + sex + job + age + inkomen + 
+                    adl_num + wzc + ab_base + tau_base +
+                    edu + bmi + cdrsb_base,
+                  #weights = weights_lm,
+                  data = alz)
+
+model_beta1 <- lm(beta1 ~ trial + sex + job + age + inkomen + 
+                    adl_num + wzc + ab_base + tau_base +
+                    edu + bmi + cdrsb_base,
+                  #weights = weights_lm,
+                  data = alz)
+
+## So these are the starting points
+## We want to reduce the models
+
+step_beta_0 <- step(model_beta0)
+
+model_beta0_final <- step_beta_0$call
+
+## Se servisse
+# lm(formula = beta0 ~ job + age + inkomen + adl_disc + wzc + ab_base + 
+# tau_base + edu + bmi + cdrsb_base, data = alz)
+
+step_beta_1 <- step(model_beta1)
+
+model_beta1_final <- step_beta_1$call
+
+## Se servisse
+# lm(formula = beta1 ~ adl_disc + wzc + edu + cdrsb_base, data = alz)
+
+coeff_beta0_final <- model_beta0_final$coefficients
+coeff_beta1_final <- model_beta1_final$coefficients
+
+
+
+
+
+
+#### PROVA ####
+library(Matrix)
+
+# 1️⃣ Definisci le risposte (stacked vector)
+y <- as.vector(t(cbind(beta0, beta1)))  # [β0_1, β1_1, β0_2, β1_2, ...]
+
+# 2️⃣ Definisci la matrice delle covariate individuali Z (una per paziente)
+Z <- model.matrix(~ trial + sex + job + age + inkomen + 
+                    adl_num + wzc + ab_base + tau_base +
+                    edu + bmi + cdrsb_base, data = alz)
+
+# 3️⃣ Crea la grande matrice a blocchi diagonali
+#    Ogni blocco corrisponde a Z_i ripetuto per ciascun coefficiente (β0, β1)
+bigZ <- kronecker(diag(2), Z)
+
+# 4️⃣ Fitta il modello combinato
+fit_big <- gls(y ~ bigZ - 1,
+               na.action = na.exclude)  # "-1" per evitare un intercept duplicato
+summary(fit_big)
+
+
+
+
+
+
+#### POSSIBILE MODIFICA DELLO STAGE 1 ####
 
 ## We need to decide the form of the error matrix Sigma_i
 
@@ -189,175 +558,6 @@ ggplot(r_squared_visual, aes(x = n_obs, y = r2_stage1)) +
     plot.title = element_text(hjust = 0.5)
   )
 
-### STAGE 2 MODEL ###
-
-## First of all store the results
-beta0 <- coeff_stage1[, 1]
-beta1 <- coeff_stage1[, 2]
-
-model_beta0 <- lm(beta0 ~ trial + sex + job + age + inkomen + 
-                    adl_num + wzc + ab_base + tau_base +
-                    edu + bmi + cdrsb_base,
-                  #weights = weights_lm,
-                  data = alz)
-
-model_beta1 <- lm(beta1 ~ trial + sex + job + age + inkomen + 
-                    adl_num + wzc + ab_base + tau_base +
-                    edu + bmi + cdrsb_base,
-                  #weights = weights_lm,
-                  data = alz)
-
-## So these are the starting points
-## We want to reduce the models
-
-step_beta_0 <- step(model_beta0)
-
-model_beta0_final <- step_beta_0$call
-
-## Se servisse
-# lm(formula = beta0 ~ job + age + inkomen + adl_disc + wzc + ab_base + 
-# tau_base + edu + bmi + cdrsb_base, data = alz)
-
-step_beta_1 <- step(model_beta1)
-
-model_beta1_final <- step_beta_1$call
-
-## Se servisse
-# lm(formula = beta1 ~ adl_disc + wzc + edu + cdrsb_base, data = alz)
-
-coeff_beta0_final <- model_beta0_final$coefficients
-coeff_beta1_final <- model_beta1_final$coefficients
-
-
-
-
-
-
-#### PROVA ####
-library(Matrix)
-
-# 1️⃣ Definisci le risposte (stacked vector)
-y <- as.vector(t(cbind(beta0, beta1)))  # [β0_1, β1_1, β0_2, β1_2, ...]
-
-# 2️⃣ Definisci la matrice delle covariate individuali Z (una per paziente)
-Z <- model.matrix(~ trial + sex + job + age + inkomen + 
-                    adl_num + wzc + ab_base + tau_base +
-                    edu + bmi + cdrsb_base, data = alz)
-
-# 3️⃣ Crea la grande matrice a blocchi diagonali
-#    Ogni blocco corrisponde a Z_i ripetuto per ciascun coefficiente (β0, β1)
-bigZ <- kronecker(diag(2), Z)
-
-# 4️⃣ Fitta il modello combinato
-fit_big <- gls(y ~ bigZ - 1,
-               na.action = na.exclude)  # "-1" per evitare un intercept duplicato
-summary(fit_big)
-
-
-
-
-
-
-#### VECCHIO CODICE BAKCUP ####
-
-count <- 0
-coeff_stage1 <- matrix(nrow = length(alz$patid), ncol = 2)
-sigma_stage_1 <- matrix(nrow = length(alz$patid), ncol = 1)
-r2_stage1 <- matrix(nrow = length(alz$patid), ncol = 1)
-r2_stage1_quad <- matrix(nrow = length(alz$patid), ncol = 1)
-sum_squares <- matrix(nrow = length(alz$patid), ncol = 3)
-
-# We assume basically that bprs_i = beta_0i + beta_1i * year_i + eps_i
-# We should define a structure for the errors
-# Usually it is reasonable to consider esp_i ~ N(0, Sigma)
-# and Sigma = sigma^2 * I
-
-for (i in 1:(length(alz$patid))) {
-  idx <- (7 * i + 1):(7 * i + 7)
-  bprs_values <- alz_long$bprs[idx]
-  mean_bprs <- mean(bprs_values, na.rm = TRUE)
-  sum_squares[i, 1] <- sum((bprs_values - mean_bprs)^2, na.rm = TRUE)
-  mod_prova <- lm(bprs ~ year, 
-                  data = alz_long[c((7*count + 1) : (7*count + 7)), ])
-  mod_prova_quad <- lm(bprs ~ year + I(year^2), 
-                  data = alz_long[c((7*count + 1) : (7*count + 7)), ])
-  coeff_stage1[i, ] <- mod_prova$coefficients
-  r2_stage1[i] <- summary(mod_prova)$r.squared
-  r2_stage1_quad[i] <- summary(mod_prova_quad)$r.squared
-  sigma_prov <- sqrt(sum(residuals(mod_prova)^2) / df.residual(mod_prova))
-  sigma_stage_1[i] <- sigma_prov
-  sum_squares[i, 2] <- sum(residuals(mod_prova)^2)
-  sum_squares[i, 3] <- sum(residuals(mod_prova_quad)^2)
-  count = count + 1
-}
-
-## Quick visualization of the data
-
-r_squared_meta <- 1 - (sum(sum_squares[, 2], na.rm = TRUE) / sum(sum_squares[, 1], na.rm = TRUE))
-r_squared_meta_quad <- 1 - (sum(sum_squares[, 3], na.rm = TRUE) / sum(sum_squares[, 1], na.rm = TRUE))
-
-## Value really high, not that bad
-
-# Visualization
-
-r_squared_visual <- data.frame(
-  n_obs = alz$n_obs_data,
-  r2_stage1 = r2_stage1
-)
-
-r_squared_visual_quad <- data.frame(
-  n_obs = alz$n_obs_data,
-  r2_stage1 = r2_stage1_quad
-)
-
-ggplot(r_squared_visual, aes(x = n_obs, y = r2_stage1)) +
-  geom_point(alpha = 0.6, color = "blue", size = 2) +
-  geom_hline(yintercept = r_squared_meta, linetype = "dashed", color = "red", size = 1) +
-  labs(
-    title = "Scatterplot of R² under Linear Model",
-    x = "Number n_i of measurements",
-    y = "Coefficient Ri²"
-  ) +
-  scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2)) +
-  theme_minimal() +
-  theme(
-    panel.grid.minor = element_blank(),
-    plot.title = element_text(hjust = 0.5)
-  )
-
-ggplot(r_squared_visual_quad, aes(x = n_obs, y = r2_stage1)) +
-  geom_point(alpha = 0.6, color = "blue", size = 2) +
-  geom_hline(yintercept = r_squared_meta_quad, linetype = "dashed", color = "red", size = 1) +
-  labs(
-    title = "Scatterplot of R² under Quadratic Model",
-    x = "Number n_i of measurements",
-    y = "Coefficient Ri²"
-  ) +
-  scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2)) +
-  theme_minimal() +
-  theme(
-    panel.grid.minor = element_blank(),
-    plot.title = element_text(hjust = 0.5)
-  )
-
-### COMPARAZIONE MODELLI - F TEST 
-
-## Prova veloce
-
-# Totali aggregati
-SSE_L <- sum(sum_squares[, 2], na.rm = TRUE)
-SSE_Q <- sum(sum_squares[, 3], na.rm = TRUE)
-
-df_L <- sum(alz$n_obs_data - 2)               # due parametri: beta0, beta1
-df_Q <- sum(alz$n_obs_data - 3)               # tre parametri: beta0, beta1, beta2
-
-# F-test aggregato
-F_meta <- ((SSE_L - SSE_Q) / (df_L - df_Q)) / (SSE_Q / df_Q)
-p_meta <- 1 - pf(F_meta, df_L - df_Q, df_Q)
-
-cat("F_meta =", F_meta, "  p-value =", p_meta, "\n")
-
-# Here the stage 1 model is over
 
 ### STAGE 2 MODEL ###
 
