@@ -3,7 +3,7 @@ library(ggplot2)
 library(dplyr)
 library(ggrepel)  
 library(broom)
-library(nlme)
+library(lme4)
 
 # Modello OLS 
 
@@ -200,3 +200,63 @@ ggplot() +
 #linea orizzontale come ci si aspettava, ma non va bene --> RANDOM SLOPES NECESSARIA
 
 #se ne può discutere, incremeneto minimo se si guarda al grafico con scala più grande (forse non ha s)
+
+
+
+#########################################
+#########################################
+#########################################
+#########################################
+
+anova(mod_lme1, mod_lme) #test meglio intercetta e slopes
+
+
+mod_lme2 <- lme(
+  bprs ~ (trial + sex + age + edu + bmi + inkomen + job +
+            adl + wzc + cdrsb_base +
+            ab_base + tau_base) * year,
+  data = alz_long,
+  random = list(
+    trial = pdIdent(~ 1),        # intercept per centro
+    sample = pdSymm(~ 1 + year)   # intercept+slope per paziente
+  ),
+  na.action = na.exclude,
+  method = "REML"
+)
+
+anova(mod_lme2, mod_lme)
+
+mod_lme_gaus <- lme(
+  bprs ~ (trial + sex + age + edu + bmi + inkomen + job +
+            adl + wzc + cdrsb_base + ab_base + tau_base) * year,
+  data = alz_long,
+  random = ~ 1 + year | sample,                # intercetta + slope casuali
+  correlation = corGaus(form = ~ year | sample),# AR(1) serial correlation
+  na.action = na.exclude,
+  method = "REML"
+)
+
+mod_lme_exp <- lme(
+  bprs ~ (trial + sex + age + edu + bmi + inkomen + job +
+            adl + wzc + cdrsb_base + ab_base + tau_base) * year,
+  data = alz_long,
+  random = ~ 1 + year | sample,                # intercetta + slope casuali
+  correlation = corExp(form = ~ year | sample),# AR(1) serial correlation
+  na.action = na.exclude,
+  method = "REML"
+)
+
+anova(mod_lme_gaus, mod_lme_exp, mod_lme) #posso guardare reml perchè stessi modelli cambia solo covarianza#
+
+
+#quindi: dal grafico si vede che i nostri random effecr catturano bene quindi il default è okkay, 
+#ne proviamo qualcuna (come ho fatto) e si vede che non servono, la base è sufficiente
+# inoltre varianza dell'intercetta è slope alte come si vede di seguito quindi spiegano
+#anche correlazione interessante 
+vc <- VarCorr(mod_lme)
+vc
+
+
+
+
+
