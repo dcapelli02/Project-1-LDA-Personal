@@ -4,10 +4,12 @@ library(dplyr)
 library(ggrepel)  
 library(broom)
 library(lme4)
+library(emdbook)
+library(RLRsim)
 
 # Modello OLS 
 
-#Preliminary Mean Structure
+# 1. Preliminary Mean Structure
 mod_ols <- lm(
   bprs ~ (trial + sex + age + edu + bmi + inkomen + job +
             adl + wzc + cdrsb_base +
@@ -18,7 +20,7 @@ mod_ols <- lm(
 
 # Modello lme 
 
-#Preliminary Random-eﬀects Structure
+# 2. Preliminary Random-eﬀects Structure
 # Residui OLS
 df_ols <- alz_long %>%
   mutate(
@@ -142,20 +144,11 @@ ggplot() +
 #curve molto vicine, sembra fare molto bene
 
 
-
 #PROVA
 #modello con solo random intercept e non random slopes
 #modello con solo solo intercetta casuale
 
-# 1. Modello OLS
-mod_ols <- lm(
-  bprs ~ (trial + sex + age + edu + bmi + inkomen + job +
-            adl + wzc + cdrsb_base +
-            ab_base + tau_base) * year,
-  data = alz_long
-)
-
-# 2. Modello LME con solo intercetta casuale
+# Modello LME con solo intercetta casuale
 mod_lme1 <- lme(
   bprs ~ (trial + sex + age + edu + bmi + inkomen + job +
             adl + wzc + cdrsb_base +
@@ -166,7 +159,7 @@ mod_lme1 <- lme(
 )
 
 
-# 3. Varianza fittata dal modello LME (solo intercetta casuale)
+# Varianza fittata dal modello LME (solo intercetta casuale)
 vc <- VarCorr(mod_lme1)
 
 d00 <- as.numeric(vc["(Intercept)", "Variance"])   # Var(random intercept)
@@ -180,7 +173,7 @@ df_var <- data.frame(
   modello = "Fitted variance (LME)"
 )
 
-# 5. Grafico: curva smussata OLS vs linea costante LME
+# Grafico: curva smussata OLS vs linea costante LME
 ggplot() +
   # curva smussata dei residui OLS (empirica)
   geom_smooth(data = df_ols, aes(x = year, y = resid2),
@@ -197,35 +190,9 @@ ggplot() +
     panel.grid.minor = element_blank()
   )
 
-#linea orizzontale come ci si aspettava, ma non va bene --> RANDOM SLOPES NECESSARIA
+#linea orizzontale come ci si aspettava, ma non va bene --> RANDOM SLOPES NECESSARIA--> dopo test 
 
-#se ne può discutere, incremeneto minimo se si guarda al grafico con scala più grande (forse non ha s)
-
-
-
-#########################################
-#########################################
-#########################################
-#########################################
-
-anova(mod_lme1, mod_lme) #test meglio intercetta e slopes
-
-
-mod_lme2 <- lme(
-  bprs ~ (trial + sex + age + edu + bmi + inkomen + job +
-            adl + wzc + cdrsb_base +
-            ab_base + tau_base) * year,
-  data = alz_long,
-  random = list(
-    trial = pdIdent(~ 1),        # intercept per centro
-    sample = pdSymm(~ 1 + year)   # intercept+slope per paziente
-  ),
-  na.action = na.exclude,
-  method = "REML"
-)
-
-anova(mod_lme2, mod_lme)
-
+# 3. Residual Covariance Structure
 mod_lme_gaus <- lme(
   bprs ~ (trial + sex + age + edu + bmi + inkomen + job +
             adl + wzc + cdrsb_base + ab_base + tau_base) * year,
@@ -255,6 +222,106 @@ anova(mod_lme_gaus, mod_lme_exp, mod_lme) #posso guardare reml perchè stessi mo
 #anche correlazione interessante 
 vc <- VarCorr(mod_lme)
 vc
+VarCorr(mod_lme_gaus)
+VarCorr(mod_lme_exp)
+
+# 4. Reduction of Preliminary Random-eﬀects Structure
+mod_lme1 <- lme(
+  bprs ~ (trial + sex + age + edu + bmi + inkomen + job +
+            adl + wzc + cdrsb_base +
+            ab_base + tau_base) * year,
+  data = alz_long,
+  random = ~ 1 | sample,
+  na.action = na.exclude
+)
+mod_lme2 <- lme(
+  bprs ~ (trial + sex + age + edu + bmi + inkomen + job +
+            adl + wzc + cdrsb_base +
+            ab_base + tau_base) * year,
+  data = alz_long,
+  random = list(
+    trial = pdIdent(~ 1),        # intercept per centro
+    sample = pdSymm(~ 1 + year)   # intercept+slope per paziente
+  ),
+  na.action = na.exclude,
+  method = "REML"
+)
+
+
+#test slopes+intercept vs intercept
+
+#necessario usare una mixture di chi squared
+
+lrt <- anova(mod_lme1, mod_lme) #lme1 è modello con sola intercetta, lme modello con intercetta+slope
+LRT_value <- lrt$"L.Ratio"[2]
+pval <- dchibarsq(LRT_value, df = c(1,2))
+#intercetta + slope TOOOP
+
+#test intercept vs nothing
+lrt1 <- anova(mod_lme1, mod_ols)
+LRT_value1 <- lrt1$"L.Ratio"[2]
+pval1 <- dchibarsq(LRT_value1, df = 1)
+pval1
+#con random intercept meglio che senza niente --> non sono sicuro del df=1, da controllare
+
+#POSSIBILE COMMENTO:
+#a likelihood ratio test on the random intercept
+#variance indicated that the variance was significantly different from 0, χ(0:1) = ........., p = .......,
+#suggesting that there were significant differences between subjects in the baseline mean response.”
+
+# 5. Reduction of Preliminary Mean Structure
+summary(mod_lme)
+
+#LR test secondo intuizioni teoriche
+#testa su edu su inkomen adl, ab_base e tau_base e sex
+
+mod_full <- mod_lme <- lme(
+  bprs ~ (trial + sex + age + edu + bmi + inkomen + job +
+            adl + wzc + cdrsb_base +
+            ab_base + tau_base) * year,
+  data = alz_long,
+  random = ~ year | sample,
+  na.action = na.exclude,
+  method = "ML" 
+).  ######## qua si usa ML da capire bene le differenze
+
+# lavoro a blocchi per ridurre il rischio di test multipli, non troppa evidenza per ad e sex, possiamo parlarne
+mod_red <- update(mod_full, . ~ . - edu- inkomen)
+anova(mod_red, mod_full) 
+
+mod_red1 <- update(mod_red, . ~ . - adl)
+anova(mod_red1, mod_red) 
+
+mod_red2 <- update(mod_red1, . ~ . - ab_base - tau_base)
+anova(mod_red2, mod_red1) 
+
+mod_red3 <- update(mod_red2, . ~ . - sex)
+anova(mod_red3, mod_red1) 
+
+#FINE!
+final_model_mixed <- mod_red3
+
+
+###################
+###################
+###################
+
+#visualizzazione slope e intercept 
+
+re <- ranef(final_model_mixed)
+head(re)
+df_re <- data.frame(id = rownames(re),
+                    intercept = re[, "(Intercept)"],
+                    slope_time = re[, "year"])
+
+hist(df_re$intercept, main="Intercepts", xlab="Intercepts")
+
+plot(df_re$intercept, df_re$slope_time,
+     xlab="Intercepts", ylab="Slopes time")
+text(df_re$intercept, df_re$slope_time, labels=df_re$id, pos=4, cex=0.7)
+#strong correlation between slopes and intercept
+
+hist(df_re$slope_time, main="Slopes time", xlab="Slopes time")
 
 
 
