@@ -134,12 +134,3 @@ model_gls_4 <- gls(
 
 anova(model_gls_1, model_gls_2, model_gls_3, model_gls_4)
 
-
-#alz_long <- alz_long %>%
-#  arrange(patid, year) %>%
-#  group_by(patid) %>%
-#  mutate(year_seq = row_number()) %>%
-#  ungroup()
-
-
-
