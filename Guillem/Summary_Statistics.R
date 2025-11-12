@@ -4,6 +4,8 @@ library(gridExtra)
 # Define the outcome variable
 outcome <- "bprs"
 
+alz$n_obs_data <- rowSums(!is.na(alz[, c(18:24)]))
+
 # Compute summary statistics: AUC, endpoint, increment
 summary_stats <- alz_long %>%
   group_by(patid) %>%
@@ -28,7 +30,7 @@ summary_stats <- alz_long %>%
     yini = last(na.omit(.data[[outcome]])),
     
     # Last Time Point Observed
-    tmax = last(na.omit(year)),
+    tmax = last(n_obs_data),
     
     # Increment
     increment = yini - y0,
@@ -58,7 +60,7 @@ summary(model_endpoint)
 
 cat("The most significant ones are: age, HigherEdu, inkomen, job, adl, wzc, abpet_base and cdrsb_base(***)")
 
-#Endpoints (Depending also on the bprs baseline) Linear Regression including bprs as a predictor
+#Covariance (Depending also on the bprs baseline) Linear Regression including bprs as a predictor
 model_ancova <- lm(yini ~ y0 + trial + sex + age + edu + bmi + inkomen + job + adl + wzc + abpet_base + taupet_base + cdrsb_base, 
                    data = summary_stats)
 
