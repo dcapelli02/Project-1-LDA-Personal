@@ -6,6 +6,10 @@ outcome <- "bprs"
 
 alz$n_obs_data <- rowSums(!is.na(alz[, c(18:24)]))
 
+alz_long <- alz_long %>%
+  left_join(alz %>% select(patid, n_obs_data), by = "patid")
+
+
 # Compute summary statistics: AUC, endpoint, increment
 summary_stats <- alz_long %>%
   group_by(patid) %>%
@@ -36,7 +40,13 @@ summary_stats <- alz_long %>%
     increment = yini - y0,
     
     # Area Under the Curve (AUC) using trapezoidal rule
-    AUC = sum(diff(year) * (head(.data[[outcome]], -1) + tail(.data[[outcome]], -1)) / 2, na.rm = TRUE)
+    AUC = sum(diff(year) * (head(.data[[outcome]], -1) + tail(.data[[outcome]], -1)) / 2, na.rm = TRUE),
+    
+    # AUC Normalised
+    nAUC = AUC / tmax,
+    
+    # Rate of Increment
+    rate = increment / tmax
   )
 
 summary(summary_stats)
@@ -44,11 +54,11 @@ summary(summary_stats)
 
 #Build a linear model to see how baseline factors explain each person's overall summary statistics:
 
-#AUC: Area Under the Curve
-model_auc <- lm(AUC ~ trial + sex + age + edu + bmi + inkomen + job + adl + wzc + abpet_base + taupet_base + cdrsb_base, 
+#AUC: Area Under the Curve normalised
+model_nauc <- lm(nAUC ~ trial + sex + age + edu + bmi + inkomen + job + adl + wzc + abpet_base + taupet_base + cdrsb_base, 
                 data = summary_stats)
 
-summary(model_auc)
+summary(model_nauc)
 
 cat("The most significant ones are: sex, edu, inkomen, job, adl, wzc, abpet_base and taupet_base (***)")
 
@@ -76,17 +86,25 @@ summary(model_increment)
 
 cat("The most significant ones are: inkomen, job, adl, wzc, abpet_base and cdrsb_base(***)")
 
+# Rate of Increment
+model_rate <- lm(rate ~ trial + sex + age + edu + bmi + inkomen + job + adl + wzc + abpet_base + taupet_base + cdrsb_base, 
+                      data = summary_stats)
 
-AIC(model_auc, model_endpoint, model_increment, model_ancova)
+summary(model_rate)
+
+cat("The most significant ones are: sex, edu, inkomen, job, adl, wzc, abpet_base and taupet_base (***)")
+
+
+AIC(model_nauc, model_endpoint, model_increment, model_ancova, model_rate)
 
 
 # Create predicted vs observed plots for all models
-p1 <- ggplot(summary_stats, aes(x = AUC, y = fitted(model_auc))) +
+p1 <- ggplot(summary_stats, aes(x = nAUC, y = fitted(model_nauc))) +
   geom_point(alpha = 0.6) +
   geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
-  labs(title = "Predicted vs Observed: AUC",
-       x = "Observed AUC", 
-       y = "Predicted AUC") +
+  labs(title = "Predicted vs Observed: nAUC",
+       x = "Observed nAUC", 
+       y = "Predicted nAUC") +
   theme_minimal()
 
 p2 <- ggplot(summary_stats, aes(x = yini, y = fitted(model_endpoint))) +
@@ -113,13 +131,22 @@ p4 <- ggplot(summary_stats, aes(x = increment, y = fitted(model_increment))) +
        y = "Predicted Increment") +
   theme_minimal()
 
-grid.arrange(p1, p2, p3, p4, ncol = 2)
+p5 <- ggplot(summary_stats, aes(x = rate, y = fitted(model_rate))) +
+  geom_point(alpha = 0.6) +
+  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+  labs(title = "Predicted vs Observed: Rate of Change",
+       x = "Observed Rate",
+       y = "Predicted Rate") +
+  theme_minimal()
+
+
+grid.arrange(p1, p2, p3, p4, p5, ncol = 2)
 
 # Residuals vs Fitted plots for all models
-par(mfrow = c(2, 2))
+par(mfrow = c(3, 2))
 
-plot(fitted(model_auc), residuals(model_auc),
-     main = "Residuals vs Fitted: AUC",
+plot(fitted(model_nauc), residuals(model_nauc),
+     main = "Residuals vs Fitted: nAUC",
      xlab = "Fitted Values", ylab = "Residuals")
 abline(h = 0, col = "red")
 
@@ -137,6 +164,12 @@ plot(fitted(model_increment), residuals(model_increment),
      main = "Residuals vs Fitted: Increment",
      xlab = "Fitted Values", ylab = "Residuals")
 abline(h = 0, col = "red")
+
+plot(fitted(model_rate), residuals(model_rate),
+     main = "Residuals vs Fitted: Rate",
+     xlab = "Fitted Values", ylab = "Residuals")
+abline(h = 0, col = "red")
+
 
 
 
