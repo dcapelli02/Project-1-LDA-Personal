@@ -119,8 +119,8 @@ p3 <- ggplot(summary_stats, aes(x = yini, y = fitted(model_ancova))) +
   geom_point(alpha = 0.6) +
   geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
   labs(title = "Predicted vs Observed: Endpoint (ANCOVA)",
-       x = "Observed Endpoint", 
-       y = "Predicted Endpoint") +
+       x = "Observed ANCOVA", 
+       y = "Predicted ANCOVA") +
   theme_minimal()
 
 p4 <- ggplot(summary_stats, aes(x = increment, y = fitted(model_increment))) +
